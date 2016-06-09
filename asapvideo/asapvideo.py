@@ -13,8 +13,10 @@ fps = 25
 scene_duration_t = 5
 scene_duration_f = scene_duration_t * fps
 transition_t = 0.5
+width = 1000
+height = 1000
 effects = ["zoompan=z='min(zoom+0.0015,1.5)':d={df}", "zoompan=z='if(lte(zoom,1.0),1.5,max(1.001,zoom-0.0015))':d={df}"]
-scene_filter = "[{n}:v]{effect},trim=duration={dt},fade=t=in:st=0:d={tt},fade=t=out:st={te}:d={tt},scale=1296x866,setpts=PTS-STARTPTS[v{n}]"
+scene_filter = "[{n}:v]{effect},trim=duration={dt},fade=t=in:st=0:d={tt},fade=t=out:st={te}:d={tt},scale='iw*min({w}/iw\,{h}/ih)':'ih*min({w}/iw\,{h}/ih)', pad={w}:{h}:'({w}-iw*min({w}/iw\,{h}/ih))/2':'({h}-ih*min({w}/iw\,{h}/ih))/2',setpts=PTS-STARTPTS[v{n}]"
 audio_fade_out_t = 4
 audio_tracks_index_url = "https://s3.amazonaws.com/asapvideo/audio/tracks.json"
 
@@ -47,7 +49,7 @@ def make_from_dir(dir):
         pass
 
     # create all video streams by applying effects to every image we found
-    applied_filters = [scene_filter.format(n=ind, effect=effects[ind % 2].format(df=scene_duration_f), dt=scene_duration_t, tt=transition_t, te=scene_duration_t-transition_t) for ind, x in enumerate(inputs)]
+    applied_filters = [scene_filter.format(n=ind, effect=effects[ind % 2].format(df=scene_duration_f), dt=scene_duration_t, tt=transition_t, te=scene_duration_t-transition_t, w=width, h=height) for ind, x in enumerate(inputs)]
     # concatenate all video streams into a single stream
     applied_filters.append("{tags} concat=n={count}:v=1:a=0 [video]".format(tags="".join(["[v{0}]".format(ind) for ind, x in enumerate(inputs)]), count=count))
 
