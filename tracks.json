@@ -1,0 +1,19 @@
+{
+	"tracks" : [
+		{
+			"url": "https://s3.amazonaws.com/asapvideo/audio/track1.wav",
+			"length": 11,
+			"type": "loop"
+		},
+		{
+			"url": "https://s3.amazonaws.com/asapvideo/audio/track2.wav",
+			"length": 11,
+			"type": "loop"
+		},
+		{
+			"url": "https://s3.amazonaws.com/asapvideo/audio/track3.wav",
+			"length": 13,
+			"type": "loop"
+		}
+	]
+}
