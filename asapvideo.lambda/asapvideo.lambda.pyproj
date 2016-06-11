@@ -3,20 +3,20 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <SchemaVersion>2.0</SchemaVersion>
-    <ProjectGuid>5ccefc9b-e77c-43f6-a04a-2ec98b90985c</ProjectGuid>
-    <ProjectHome>.</ProjectHome>
-    <StartupFile>asapvideo.py</StartupFile>
-    <SearchPath>
-    </SearchPath>
+    <ProjectGuid>01a0ed79-b843-42be-b722-0de9e34b33a0</ProjectGuid>
+    <ProjectHome>
+    </ProjectHome>
+    <StartupFile>asapvideo.lambda.py</StartupFile>
+    <SearchPath>..\asapvideo</SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
     <OutputPath>.</OutputPath>
-    <Name>asapvideo</Name>
-    <RootNamespace>asapvideo</RootNamespace>
+    <Name>asapvideo.lambda</Name>
+    <RootNamespace>asapvideo-process</RootNamespace>
     <IsWindowsApplication>False</IsWindowsApplication>
-    <InterpreterId>
-    </InterpreterId>
-    <InterpreterVersion>
-    </InterpreterVersion>
+    <InterpreterId>{9a7a9026-48c1-4688-9d5d-e5699d47d074}</InterpreterId>
+    <InterpreterVersion>2.7</InterpreterVersion>
+    <LaunchProvider>Standard Python launcher</LaunchProvider>
+    <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -27,7 +27,17 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="asapvideo.py" />
+    <Compile Include="asapvideo.lambda.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\asapvideo\asapvideo.pyproj">
+      <Name>asapvideo</Name>
+      <Project>{5ccefc9b-e77c-43f6-a04a-2ec98b90985c}</Project>
+      <Private>True</Private>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <InterpreterReference Include="{9a7a9026-48c1-4688-9d5d-e5699d47d074}\2.7" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
