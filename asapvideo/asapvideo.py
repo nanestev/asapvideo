@@ -18,11 +18,11 @@ OUTPUT_VIDEO_HEIGHT = 800
 AUDIO_FADE_OUT_T = 4
 AUDIO_TRACKS_INDEX_URL = "https://s3.amazonaws.com/asapvideo/audio/tracks.json"
 
-def make_from_dir(dir, scene_duration = SCENE_DURATION_T, outdir=dir):
+def make_from_dir(dir, scene_duration = SCENE_DURATION_T, outdir=dir, ffmpeg='ffmpeg'):
     # add all image files in the folder as input
-    return _make(OrderedDict([(ff, None) for ff in [os.path.join(dir,f) for f in os.listdir(dir)] if imghdr.what(ff) != None]), scene_duration, outdir)
+    return _make(OrderedDict([(ff, None) for ff in [os.path.join(dir,f) for f in os.listdir(dir)] if imghdr.what(ff) != None]), scene_duration, outdir, ffmpeg)
 
-def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None):
+def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None, ffmpeg='ffmpeg'):
     regex = r'('
     # Scheme (HTTP, HTTPS, FTP and SFTP):
     regex += r'(?:(https?|s?ftp):\/\/)?'
@@ -43,9 +43,9 @@ def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None):
     regex += r')'
     prog = re.compile(regex, re.IGNORECASE)
     # add all urls that are recognised as correct, return status code 200 and image content type
-    return _make(OrderedDict([(r.geturl(), None) for r in [urllib2.urlopen(u) for u in list if prog.match(u)] if r.getcode() == 200 and r.info().getheader('Content-Type').startswith("image")]), scene_duration, outdir)
+    return _make(OrderedDict([(r.geturl(), None) for r in [urllib2.urlopen(u) for u in list if prog.match(u)] if r.getcode() == 200 and r.info().getheader('Content-Type').startswith("image")]), scene_duration, outdir, ffmpeg)
 
-def _make(inputs, scene_duration, dir):
+def _make(inputs, scene_duration, dir, ffmpeg):
     # exit if no images were found
     if bool(inputs) == False:
         return None
@@ -70,7 +70,7 @@ def _make(inputs, scene_duration, dir):
         audio_track = next(iter(audio_tracks))
     except:
         # if we fail to select audio track we log error message and continue
-        print("Failed to select audio track: ", sys.exc_info()[0].message)
+        print("Failed to select audio track: ", sys.exc_info()[0])
 
     # create all video streams by applying effects to every image we found
     applied_filters = [scene_filter.format(n=ind, effect=effects[ind % 2].format(df=scene_duration_f), dt=scene_duration, tt=TRANSITION_T, te=scene_duration-TRANSITION_T, w=OUTPUT_VIDEO_WIDTH, h=OUTPUT_VIDEO_HEIGHT) for ind, x in enumerate(inputs)]
@@ -93,6 +93,7 @@ def _make(inputs, scene_duration, dir):
     output = "video.mp4"
     output = os.path.join(dir,output) if dir else output
     ff = FFmpeg(
+        executable = ffmpeg,
         global_options = ["-y"],
         inputs = inputs,
         outputs = {output: "-filter_complex \"" + ";".join(applied_filters) + "\" -map \"[video]\"" + (" -map \"[audio]\"" if audio_track else "") + " -c:v libx264 -pix_fmt yuvj420p -q:v 1"}

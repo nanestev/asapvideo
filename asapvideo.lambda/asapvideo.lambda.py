@@ -1,7 +1,9 @@
 import os
 import sys
+import stat
 import boto3
 import asapvideo
+import shutil
 
 def lambda_handler(event, context):
     for record in event['Records']:
@@ -13,7 +15,8 @@ def lambda_handler(event, context):
             try:
                 file = asapvideo.make_from_url_list(
                     request['urls']['SS'], 
-                    scene_duration = int(request['scene_duration']['N'] if 'scene_duration' in request else asapvideo.SCENE_DURATION_T))
+                    scene_duration = int(request['scene_duration']['N'] if 'scene_duration' in request else asapvideo.SCENE_DURATION_T),
+                    ffmpeg = get_ffmpeg() )
                 if file:
                     s3 = boto3.client('s3')
                     transfer = boto3.s3.transfer.S3Transfer(s3)
@@ -22,7 +25,7 @@ def lambda_handler(event, context):
                     video = "https://s3.amazonaws.com/asapvideo/" + key
                 succeeded = True
             except:
-                print("Failed to make video: ", sys.exc_info()[0].message)
+                print("Failed to make video: ", sys.exc_info()[0])
 
             update_record(id, "processed" if succeeded else "failed", video)
             
@@ -43,6 +46,15 @@ def update_record(id, status, video = None):
         UpdateExpression=update_expr,
         ExpressionAttributeValues=expr_attr_values
     )
+
+def get_ffmpeg():
+    if os.path.isfile("/tmp/ffmpeg"):
+        return os.path.abspath("/tmp/ffmpeg")
+    elif os.path.isfile("ffmpeg"):
+        shutil.copy("ffmpeg", "/tmp/ffmpeg")
+        os.chmod("/tmp/ffmpeg", stat.S_IEXEC)
+        return os.path.abspath("/tmp/ffmpeg")
+    return "ffmpeg"
 
 #if __name__ == "__main__":
 #    event = {
