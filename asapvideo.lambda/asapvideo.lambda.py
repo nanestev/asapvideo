@@ -6,28 +6,37 @@ import asapvideo
 import shutil
 
 def lambda_handler(event, context):
-    for record in event['Records']:
-        if record['eventName'] == 'INSERT':
-            request = record['dynamodb']['NewImage']
-            id = request['id']['S']
-            succeeded = False
-            video = None
-            try:
-                file = asapvideo.make_from_url_list(
-                    request['urls']['SS'], 
-                    scene_duration = int(request['scene_duration']['N'] if 'scene_duration' in request else asapvideo.SCENE_DURATION_T),
-                    ffmpeg = get_ffmpeg() )
-                if file:
-                    s3 = boto3.client('s3')
-                    transfer = boto3.s3.transfer.S3Transfer(s3)
-                    key = 'video/' + id + os.path.splitext(file)[1]
-                    transfer.upload_file(file, 'asapvideo', key, extra_args={'ACL': 'public-read'})
-                    video = "https://s3.amazonaws.com/asapvideo/" + key
-                succeeded = True
-            except:
-                print("Failed to make video: ", sys.exc_info()[0])
+    # iterate through all the records and 
+    for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'INSERT']:
+        id = record['id']['S']
+        succeeded = False
+        video = None
+        try:
+            # creates ouput directory
+            outdir = "/tmp/" + id
+            if not os.path.exists(outdir):
+                os.makedirs(outdir)
 
-            update_record(id, "processed" if succeeded else "failed", video)
+            # runs video creation
+            file = asapvideo.make_from_url_list(
+                record['urls']['SS'], 
+                scene_duration = int(record['scene_duration']['N'] if 'scene_duration' in record else asapvideo.SCENE_DURATION_T),
+                outdir = outdir,
+                ffmpeg = get_ffmpeg() )
+            
+            # if video was create successfully, we upload to s3
+            if file:
+                s3 = boto3.client('s3')
+                transfer = boto3.s3.transfer.S3Transfer(s3)
+                key = 'video/' + id + os.path.splitext(file)[1]
+                transfer.upload_file(file, 'asapvideo', key, extra_args={'ACL': 'public-read'})
+                video = "https://s3.amazonaws.com/asapvideo/" + key
+
+            succeeded = True
+        except:
+            print("Failed to make video: ", sys.exc_info()[0])
+
+        update_record(id, "processed" if succeeded else "failed", video)
             
 
 def update_record(id, status, video = None):
@@ -68,9 +77,9 @@ def get_ffmpeg():
 #                        },
 #                        "urls": {
 #                            "SS": [
-#                                "url1",
-#                                "url2",
-#                                "url3"
+#                                "https://lh3.googleusercontent.com/XXvySCbKjkY-vi9AFC84-UGmLOcpDG7LfK8gXIUxWNgMua8TJD9KMhbSVVP7igLE4JmI95Wu3A8=w1920-h1080-rw-no",
+#                                "https://lh3.googleusercontent.com/2wCn3hznt-gP9bnh0CIhrQyZEg0mnqxV6G8s3NhiVbn6XR-aGqQX6wV7zo70h_-O4bVhpeWRwg0=w1920-h1080-rw-no",
+#                                "https://lh3.googleusercontent.com/_2c0u2O_6GU2cwL3uyx7BKUCgTEu0FJocKUZa7EHa840VZ-hwTr05FBA0MtEmf_Ae8nHAGDeZFI=w1920-h1080-rw-no"
 #                            ]
 #                        }
 #                    }

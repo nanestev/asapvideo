@@ -91,7 +91,7 @@ def _make(inputs, scene_duration, dir, ffmpeg):
 
     # build the video
     output = "video.mp4"
-    output = os.path.join(dir,output) if dir else output
+    output = dir + "/" + output if dir else output
     ff = FFmpeg(
         executable = ffmpeg,
         global_options = ["-y"],
