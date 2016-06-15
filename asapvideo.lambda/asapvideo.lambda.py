@@ -6,7 +6,6 @@ import asapvideo
 import shutil
 
 def lambda_handler(event, context):
-    print "enter lambda_handler ..."
     # iterate through all the records and 
     for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'INSERT']:
         id = record['id']['S']
@@ -24,8 +23,10 @@ def lambda_handler(event, context):
                 scene_duration = int(record['scene_duration']['N'] if 'scene_duration' in record else asapvideo.SCENE_DURATION_T),
                 outdir = outdir,
                 ffmpeg = get_ffmpeg(),
-                width = int(record['width']['N'] if 'width' in record else None),
-                height = int(record['height']['N'] if 'height' in record else None))
+                width = int(record['width']['N']) if 'width' in record else None,
+                height = int(record['height']['N']) if 'height' in record else None,
+                transition = record['transition']['S'] if 'transition' in record else None,
+                effect = record['effect']['S'] if 'effect' in record else None)
             
             # if video was create successfully, we upload to s3
             if file:
@@ -43,7 +44,6 @@ def lambda_handler(event, context):
             
 
 def update_record(id, status, video = None):
-    print "enter update_record ..."
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table('asapvideo')
     update_expr = 'SET sts = :val1'
@@ -61,7 +61,6 @@ def update_record(id, status, video = None):
     )
 
 def get_ffmpeg():
-    print "enter get_ffmpeg ..."
     if os.path.isfile("/tmp/ffmpeg"):
         return os.path.abspath("/tmp/ffmpeg")
     elif os.path.isfile("ffmpeg"):
