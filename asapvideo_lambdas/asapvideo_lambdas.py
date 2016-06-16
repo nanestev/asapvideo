@@ -5,12 +5,12 @@ import boto3
 import asapvideo
 import shutil
 
-def lambda_handler(event, context):
+def process_request_handler(event, context):
     # iterate through all the records and 
     for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'INSERT']:
         id = record['id']['S']
-        succeeded = False
-        video = None
+        state = {"sts": "failed"}
+        
         try:
             # creates ouput directory
             outdir = "/tmp/" + id
@@ -34,30 +34,25 @@ def lambda_handler(event, context):
                 transfer = boto3.s3.transfer.S3Transfer(s3)
                 key = 'video/' + id + os.path.splitext(file)[1]
                 transfer.upload_file(file, 'asapvideo', key, extra_args={'ACL': 'public-read'})
-                video = "https://s3.amazonaws.com/asapvideo/" + key
+                state.update({"video": "https://s3.amazonaws.com/asapvideo/" + key})
 
-            succeeded = True
+            state["sts"] = "processed"
         except:
             print("Failed to make video: ", sys.exc_info()[0])
 
-        update_record(id, "processed" if succeeded else "failed", video)
+        update_record(id, state)
             
-
-def update_record(id, status, video = None):
+def update_record(id, values):
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table('asapvideo')
-    update_expr = 'SET sts = :val1'
-    expr_attr_values = { ':val1': status }
-    if video:
-        update_expr = update_expr + ", video = :val2"
-        expr_attr_values.update({ ":val2": video })
+    update_expr = 'SET ' + ",".join(["{field} = :{field}".format(field = key) for key in values.iterkeys()])
 
     table.update_item(
         Key={
             'id': id
         },
         UpdateExpression=update_expr,
-        ExpressionAttributeValues=expr_attr_values
+        ExpressionAttributeValues={":" + key : value for key, value in values.iteritems()}
     )
 
 def get_ffmpeg():
@@ -91,4 +86,4 @@ def get_ffmpeg():
 #            }
 #        ]
 #    }
-#    lambda_handler(event, None)
+#    process_request_handler(event, None)

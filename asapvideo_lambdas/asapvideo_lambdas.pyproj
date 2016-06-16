@@ -6,14 +6,14 @@
     <ProjectGuid>01a0ed79-b843-42be-b722-0de9e34b33a0</ProjectGuid>
     <ProjectHome>
     </ProjectHome>
-    <StartupFile>asapvideo.lambda.py</StartupFile>
+    <StartupFile>asapvideo_lambdas.py</StartupFile>
     <SearchPath>..\asapvideo</SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
     <OutputPath>.</OutputPath>
-    <Name>asapvideo.lambda</Name>
+    <Name>asapvideo_lambdas</Name>
     <RootNamespace>asapvideo-process</RootNamespace>
     <IsWindowsApplication>False</IsWindowsApplication>
-    <InterpreterId>{9a7a9026-48c1-4688-9d5d-e5699d47d074}</InterpreterId>
+    <InterpreterId>{2af0f10d-7135-4994-9156-5d01c9c11b7e}</InterpreterId>
     <InterpreterVersion>2.7</InterpreterVersion>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
@@ -27,7 +27,7 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="asapvideo.lambda.py" />
+    <Compile Include="asapvideo_lambdas.py" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\asapvideo\asapvideo.pyproj">
@@ -37,7 +37,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <InterpreterReference Include="{9a7a9026-48c1-4688-9d5d-e5699d47d074}\2.7" />
+    <InterpreterReference Include="{2af0f10d-7135-4994-9156-5d01c9c11b7e}\2.7" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
