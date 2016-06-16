@@ -18,11 +18,7 @@ OUTPUT_VIDEO_HEIGHT = 800
 AUDIO_FADE_OUT_T = 4
 AUDIO_TRACKS_INDEX_URL = "https://s3.amazonaws.com/asapvideo/audio/tracks.json"
 
-def make_from_dir(dir, scene_duration = SCENE_DURATION_T, outdir=dir, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None):
-    # add all image files in the folder as input
-    return _make([ff for ff in [os.path.join(dir,f) for f in os.listdir(dir)] if imghdr.what(ff) != None], scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
-
-def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None):
+def get_valid_image_urls_only(list):
     regex = r'('
     # Scheme (HTTP, HTTPS, FTP and SFTP):
     regex += r'(?:(https?|s?ftp):\/\/)?'
@@ -42,8 +38,26 @@ def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None, ffm
     regex += r'(?:(\/\S+)*)'
     regex += r')'
     prog = re.compile(regex, re.IGNORECASE)
+
     # add all urls that are recognised as correct, return status code 200 and image content type
-    return _make([r.geturl() for r in [urllib2.urlopen(u) for u in list if prog.match(u)] if r.getcode() == 200 and r.info().getheader('Content-Type').startswith("image")], scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
+    result = []
+    for u in [u for u in list if prog.match(u)]:
+        try:
+            r = urllib2.urlopen(u)
+            if r.getcode() == 200 and r.info().getheader('Content-Type').startswith("image"):
+                result.append(r.geturl())
+        except:
+            pass
+
+    return result
+    
+
+def make_from_dir(dir, scene_duration = SCENE_DURATION_T, outdir=dir, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None):
+    # add all image files in the folder as input
+    return _make([ff for ff in [os.path.join(dir,f) for f in os.listdir(dir)] if imghdr.what(ff) != None], scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
+
+def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None):
+    return _make(get_valid_image_urls_only(list), scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
 
 def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, transition):
     # exit if no images were found
