@@ -18,7 +18,7 @@ OUTPUT_VIDEO_HEIGHT = 800
 AUDIO_FADE_OUT_T = 4
 AUDIO_TRACKS_INDEX_URL = "https://s3.amazonaws.com/asapvideo/audio/tracks.json"
 
-def get_valid_image_urls_only(list):
+def get_valid_media_urls_only(list, content_type = None):
     regex = r'('
     # Scheme (HTTP, HTTPS, FTP and SFTP):
     regex += r'(?:(https?|s?ftp):\/\/)?'
@@ -44,7 +44,7 @@ def get_valid_image_urls_only(list):
     for u in [u for u in list if prog.match(u)]:
         try:
             r = urllib2.urlopen(u)
-            if r.getcode() == 200 and r.info().getheader('Content-Type').startswith("image"):
+            if r.getcode() == 200 and (content_type == None or r.info().getheader('Content-Type').startswith(content_type)):
                 result.append(r.geturl())
         except:
             pass
@@ -57,7 +57,7 @@ def make_from_dir(dir, scene_duration = SCENE_DURATION_T, outdir=dir, ffmpeg='ff
     return _make([ff for ff in [os.path.join(dir,f) for f in os.listdir(dir)] if imghdr.what(ff) != None], scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
 
 def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None):
-    return _make(get_valid_image_urls_only(list), scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
+    return _make(get_valid_media_urls_only(list, "image"), scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
 
 def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, transition):
     # exit if no images were found
@@ -124,6 +124,13 @@ def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, tra
     #print ff.cmd
     ff.run()
     return output
+
+def concat_videos(list, outdir=None, ffmpeg='ffmpeg', audio=True):
+    videos = get_valid_media_urls_only(list)
+    if bool(videos) == False:
+        return None
+    
+    
 
 def _get_audio(lenght):
     try:

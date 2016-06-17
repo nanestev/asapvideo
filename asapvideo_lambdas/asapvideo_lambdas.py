@@ -13,22 +13,18 @@ def process_request_handler(event, context):
     # iterate through all the records and 
     for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'INSERT']:
         id = record['id']['S']
-        list = asapvideo.get_valid_image_urls_only(record['urls']['SS'])
+        list = asapvideo.get_valid_media_urls_only(record['urls']['SS'], 'image')
         scene_duration = int(record['scene_duration']['N']) if 'scene_duration' in record else asapvideo.SCENE_DURATION_T
         width = int(record['width']['N']) if 'width' in record else None
         height = int(record['height']['N']) if 'height' in record else None
         transition = record['transition']['S'] if 'transition' in record else None
         effect = record['effect']['S'] if 'effect' in record else None
         batches = int(math.ceil(len(list) / float(BATCH_SIZE)))
-        state = {"batches": batches}
         
         if batches == 0:
-            state.update({"sts": "processed"})
-        elif batches == 1:
-            video_url = get_video_url(id, "video", list, scene_duration, width, height, transition, effect, True)
-            state.update({"sts": "processed", "video": video_url})
+            update_record(id, {"sts": "processed"})
         else:
-            state.update({"sts": "processing"})
+            update_record(id, {"sts": "processing", "batches": {"count": batches}})
             sns = boto3.client('sns')
             for i in range(0, batches):
                 message = json.dumps(clear_dict({
@@ -48,17 +44,19 @@ def process_request_handler(event, context):
                     Subject='SubmitBatch'
                 )
 
-        update_record(id, state)
+    for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'MODIFY']:
+        if  record['sts']['S'] == 'processing' and 'batches' in record and 'outputs' in record['batches']['M'] and int(record['batches']['M']['count']['N']) == len(record['batches']['M']['outputs']['L']):
+            print "concatenating video..."
 
 def process_batch_handler(event, context):
     for record in [json.loads(r['Sns']['Message']) for r in event['Records']]:
         id = record['id']
-        state = {}
         try:
-            batch = "video" + str(record['batch'])
+            batch = int(record['batch'])
+            file_name = "video" + str(batch)
             video_url = get_video_url(
-                id, 
-                batch, 
+                "tmp/" + id, 
+                file_name, 
                 record['urls'], 
                 int(record['scene_duration']) if 'scene_duration' in record else asapvideo.SCENE_DURATION_T,
                 int(record['width']) if 'width' in record else None,
@@ -70,24 +68,27 @@ def process_batch_handler(event, context):
             if video_url == None:
                 raise Exception("No output video was created for request %s batch %s" % (id, batch))
 
-            state.update({batch: video_url})
+            add_output(id, batch, video_url)
         except:
             print("Failed to make video: ", sys.exc_info()[0])        
-            state.update({"sts":"failed"})
-
-        update_record(id, state)
+            update_record(id, {"sts":"failed"})
 
 def update_record(id, values):
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table('asapvideo')
-    update_expr = 'SET ' + ",".join(["{field} = :{field}".format(field = key) for key in values.iterkeys()])
-
     table.update_item(
-        Key={
-            'id': id
-        },
-        UpdateExpression=update_expr,
+        Key={'id': id},
+        UpdateExpression='SET ' + ",".join(["{field} = :{field}".format(field = key) for key in values.iterkeys()]),
         ExpressionAttributeValues={":" + key : value for key, value in values.iteritems()}
+    )
+
+def add_output(id, batch, output):
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table('asapvideo')
+    table.update_item(
+        Key={'id': id},
+        UpdateExpression='SET batches.outputs=list_append(if_not_exists(batches.outputs, :l), :o)',
+        ExpressionAttributeValues={":l": [], ":o": [{"batch": batch, "output": output}]}
     )
 
 def get_video_url(id, batch, urls, scene_duration, width, height, transition, effect, audio):
@@ -136,36 +137,65 @@ def clear_dict(d):
             del_none(value)
     return d
 
-if __name__ == "__main__":
-    event = {
-        "Records": [
-            {
-                "eventName": "INSERT",
-                "dynamodb": {
-                    "NewImage": {
-                        "id": {
-                            "S": "some-id"
-                        },
-                        "urls": {
-                            "SS": [
-                                "https://lh3.googleusercontent.com/XXvySCbKjkY-vi9AFC84-UGmLOcpDG7LfK8gXIUxWNgMua8TJD9KMhbSVVP7igLE4JmI95Wu3A8=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/2wCn3hznt-gP9bnh0CIhrQyZEg0mnqxV6G8s3NhiVbn6XR-aGqQX6wV7zo70h_-O4bVhpeWRwg0=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/_2c0u2O_6GU2cwL3uyx7BKUCgTEu0FJocKUZa7EHa840VZ-hwTr05FBA0MtEmf_Ae8nHAGDeZFI=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/XXvySCbKjkY-vi9AFC84-UGmLOcpDG7LfK8gXIUxWNgMua8TJD9KMhbSVVP7igLE4JmI95Wu3A8=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/2wCn3hznt-gP9bnh0CIhrQyZEg0mnqxV6G8s3NhiVbn6XR-aGqQX6wV7zo70h_-O4bVhpeWRwg0=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/_2c0u2O_6GU2cwL3uyx7BKUCgTEu0FJocKUZa7EHa840VZ-hwTr05FBA0MtEmf_Ae8nHAGDeZFI=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/XXvySCbKjkY-vi9AFC84-UGmLOcpDG7LfK8gXIUxWNgMua8TJD9KMhbSVVP7igLE4JmI95Wu3A8=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/2wCn3hznt-gP9bnh0CIhrQyZEg0mnqxV6G8s3NhiVbn6XR-aGqQX6wV7zo70h_-O4bVhpeWRwg0=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/_2c0u2O_6GU2cwL3uyx7BKUCgTEu0FJocKUZa7EHa840VZ-hwTr05FBA0MtEmf_Ae8nHAGDeZFI=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/XXvySCbKjkY-vi9AFC84-UGmLOcpDG7LfK8gXIUxWNgMua8TJD9KMhbSVVP7igLE4JmI95Wu3A8=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/2wCn3hznt-gP9bnh0CIhrQyZEg0mnqxV6G8s3NhiVbn6XR-aGqQX6wV7zo70h_-O4bVhpeWRwg0=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/_2c0u2O_6GU2cwL3uyx7BKUCgTEu0FJocKUZa7EHa840VZ-hwTr05FBA0MtEmf_Ae8nHAGDeZFI=w1920-h1080-rw-no",
-                                "https://lh3.googleusercontent.com/XXvySCbKjkY-vi9AFC84-UGmLOcpDG7LfK8gXIUxWNgMua8TJD9KMhbSVVP7igLE4JmI95Wu3A8=w1920-h1080-rw-no"
-                            ]
-                        }
-                    }
-                }
-            }
-        ]
-    }
-    process_request_handler(event, None)
+#if __name__ == "__main__":
+#    event = {
+#        "Records": [
+#            {
+#                "eventName": "INSERT",
+#                "dynamodb": {
+#                    "NewImage": {
+#                        "id": {
+#                            "S": "some-id"
+#                        },
+#                        "urls": {
+#                            "SS": [
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=1",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=2",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=3",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=4",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=5",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=6",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=7",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=8",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=9",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=10",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=11",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=12",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=13",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=14",
+#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=15",
+#                            ]
+#                        }
+#                    }
+#                }
+#            }
+#        ]
+#    }
+#    process_request_handler(event, None)
+
+#if __name__ == "__main__":
+#    event = {
+#        "Records": [
+#            {
+#                "Sns": {
+#                    "Message": json.dumps({
+#                        "id": "some-id",
+#                        "batch": 1, 
+#                        "urls": [
+#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=1",
+#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=2",
+#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=3",
+#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=4",
+#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=5",
+#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=6",
+#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=7",
+#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=8",
+#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=9",
+#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=10",
+#                        ]
+#                    })
+#                }
+#            }
+#        ]
+#    }
+#    process_batch_handler(event, None)
