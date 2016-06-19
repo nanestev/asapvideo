@@ -9,6 +9,7 @@ import urllib2
 import json
 import string
 import re
+import uuid
 
 FPS = 25
 SCENE_DURATION_T = 5
@@ -130,7 +131,25 @@ def concat_videos(list, outdir=None, ffmpeg='ffmpeg', audio=True):
     if bool(videos) == False:
         return None
     
-    
+    # make the video files list
+    file_name = str(uuid.uuid4()) + ".txt"
+    file_name = outdir + "/" + file_name if outdir else file_name
+    with open(file_name, 'w') as file:
+        for video in videos:
+            file.write("file '" + video + "'\n")
+
+    # concatenate the videos
+    output = "video.mp4"
+    output = outdir + "/" + output if outdir else output
+    ff = FFmpeg(
+        executable = ffmpeg,
+        global_options = ["-y", "-f" ,"concat", "-safe", "0", "-protocol_whitelist", "file,http,https,tcp,tls"],
+        inputs = {file_name: None},
+        outputs = {output: "-c copy"}
+	)
+    #print ff.cmd
+    ff.run(verbose=True)
+    return output
 
 def _get_audio(lenght):
     try:
