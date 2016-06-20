@@ -10,6 +10,8 @@ import json
 import string
 import re
 import uuid
+import datetime
+import time
 
 FPS = 25
 SCENE_DURATION_T = 5
@@ -148,7 +150,40 @@ def concat_videos(list, outdir=None, ffmpeg='ffmpeg', audio=True):
         outputs = {output: "-c copy"}
 	)
     #print ff.cmd
-    ff.run(verbose=True)
+    out = ff.run()
+
+    # if audio background is requested we will try to get duration of movie and matching audio file
+    if audio == True:
+        # collect data for concatenated movie total duration
+        length = time.strptime(re.findall("(?<=time\\=)[0-9.:]+", out)[-1],"%H:%M:%S.%f")
+        lenght_t = datetime.timedelta(hours=length.tm_hour,minutes=length.tm_min,seconds=length.tm_sec).total_seconds()
+        audio_track = _get_audio(lenght_t)
+        if audio_track:
+            inputs = OrderedDict([(output, None)])
+            applied_filters = ["[0:v]null[video]"]
+            # calculate number of loops for the audio track
+            audio_track_repetition = int(math.ceil(lenght_t / float(audio_track[1])))
+            # copy the audio track into the required number of audio streams
+            applied_filters.append(";".join(["[1:a]afifo[a{i}]".format(i=i) for i in range(audio_track_repetition)]))
+            # concatenate the audio streams into a single audio loop stream
+            applied_filters.append("".join(["[a{i}]".format(i=i) for i in range(audio_track_repetition)]) + "concat=n={n}:v=0:a=1[a]".format(n=audio_track_repetition))
+            # trim the audio stream to the required number of seconds and applies fade out effect
+            applied_filters.append("[a]aselect=between(t\,0\,{d}),volume='if(lt(t,{e}),1,max(1-(t-{e})/{ae},0))':eval=frame[audio]".format(d=lenght_t, e=lenght_t-AUDIO_FADE_OUT_T, ae=AUDIO_FADE_OUT_T))
+            # add the audio track to the inputs collection
+            inputs.update({audio_track[0]: None})
+
+            # build the video
+            output = "videoa.mp4"
+            output = outdir + "/" + output if outdir else output
+            ff = FFmpeg(
+                executable = ffmpeg,
+                global_options = ["-y"],
+                inputs = inputs,
+                outputs = {output: "-filter_complex \"" + ";".join(applied_filters) + "\" -map \"[video]\" -map \"[audio]\""}
+	        )
+            #print ff.cmd
+            ff.run()
+
     return output
 
 def _get_audio(lenght):
@@ -167,3 +202,12 @@ def _get_audio(lenght):
         print("Failed to select audio track: ", sys.exc_info()[0])
 
     return None
+
+#if __name__ == "__main__":
+#    list = [
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/0e4a1468-34a6-11e6-b49d-03a71b3fd792/video1.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/0e4a1468-34a6-11e6-b49d-03a71b3fd792/video2.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/0e4a1468-34a6-11e6-b49d-03a71b3fd792/video3.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/0e4a1468-34a6-11e6-b49d-03a71b3fd792/video4.mp4"
+#    ]
+#    concat_videos(list)

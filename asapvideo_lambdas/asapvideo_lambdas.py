@@ -51,6 +51,7 @@ def process_request_handler(event, context):
 def process_batch_handler(event, context):
     for record in [json.loads(r['Sns']['Message']) for r in event['Records']]:
         id = record['id']
+
         try:
             batch = int(record['batch'])
             file_name = "video" + str(batch)
