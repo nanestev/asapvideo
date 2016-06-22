@@ -14,7 +14,7 @@ def process_request_handler(event, context):
     # iterate through all new records
     for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'INSERT']:
         id = record['id']['S']
-        list = asapvideo.get_valid_media_urls_only(record['urls']['SS'], 'image')
+        list = asapvideo.get_valid_media_urls_only([o['M']['url']['S'] for o in sorted(record['urls']['L'], key=lambda url: int(url['M']['pos']['N']))], 'image')
         scene_duration = int(record['scene_duration']['N']) if 'scene_duration' in record else asapvideo.SCENE_DURATION_T
         width = int(record['width']['N']) if 'width' in record else None
         height = int(record['height']['N']) if 'height' in record else None
