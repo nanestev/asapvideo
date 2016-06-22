@@ -74,7 +74,7 @@ def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, tra
     lenght_t = scene_duration*count
     effects = {"zoompan": ["zoompan=z='min(zoom+0.0015,1.5)':d={df}", "zoompan=z='if(lte(zoom,1.0),1.5,max(1.001,zoom-0.0015))':d={df}"]}
     transitions = {"fadeinout": ["fade=t=in:st=0:d={tt},fade=t=out:st={te}:d={tt}"]}
-    scene_filter = "trim=duration={dt},scale={w}:{h},setpts=PTS-STARTPTS"
+    scene_filter = "trim=duration={dt},scale={w}:{h},setsar=1:1,setpts=PTS-STARTPTS"
 
     # load audio track if requested
     audio_track = None
