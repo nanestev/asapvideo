@@ -12,6 +12,9 @@ import re
 import uuid
 import datetime
 import time
+import traceback
+from filters import PanZoomEffectFilter, FadeTransitionFilter, SlideTransitionFilter, ConcatVideoFilter, ImageSlideFilter, FilterChain
+import multiprocessing
 
 FPS = 25
 SCENE_DURATION_T = 5
@@ -60,7 +63,9 @@ def make_from_dir(dir, scene_duration = SCENE_DURATION_T, outdir=dir, ffmpeg='ff
     return _make([ff for ff in [os.path.join(dir,f) for f in os.listdir(dir)] if imghdr.what(ff) != None], scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
 
 def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None):
-    return _make(get_valid_media_urls_only(list, "image"), scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
+    pool = multiprocessing.Pool(processes=4)
+    l = pool.map(_download_file, [(u, outdir) for u in list])
+    return _make(l, scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
 
 def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, transition):
     # exit if no images were found
@@ -72,36 +77,22 @@ def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, tra
     scene_duration_f = scene_duration * FPS
     # calculate the length of the whole video
     lenght_t = scene_duration*count
-    effects = {"zoompan": ["zoompan=z='min(zoom+0.0015,1.5)':d={df}", "zoompan=z='if(lte(zoom,1.0),1.5,max(1.001,zoom-0.0015))':d={df}"]}
-    transitions = {"fadeinout": ["fade=t=in:st=0:d={tt},fade=t=out:st={te}:d={tt}"]}
-    scene_filter = "trim=duration={dt},scale={w}:{h},setsar=1:1,setpts=PTS-STARTPTS"
+    effects = {"zoompan": PanZoomEffectFilter(scene_duration_f)}
+    transitions = {"fadeinout": FadeTransitionFilter(TRANSITION_T, scene_duration), "slidein": SlideTransitionFilter(TRANSITION_T)}
 
+    # create the video filter chain
+    videoseq = FilterChain([ImageSlideFilter(scene_duration, width/2*2 if width != None else -2 if height != None else OUTPUT_VIDEO_WIDTH, height/2*2 if height != None else -2 if width != None else OUTPUT_VIDEO_HEIGHT)])
+    if transition in transitions: 
+        videoseq.append(transitions[transition])
+    if effect in effects: 
+        videoseq.append(effects[effect])
+    videoseq.append(ConcatFilter(True, "video"))
+    applied_filters = videoseq.generate(["%d:v" % i for (i,x) in enumerate(inputs)])[0]
+    
     # load audio track if requested
     audio_track = None
     if audio == True:
-        audio_track = _get_audio(lenght_t)
-
-    # create all video streams by applying filters to every image we found
-    applied_filters = []
-    for ind, x in enumerate(inputs):
-        filter = "[{n}:v]%s[v{n}]" % (
-            ",".join([f for f in [
-                effects[effect][ind % len(effects[effect])] if effect in effects else None,
-                transitions[transition][ind % len(transitions[transition])] if transition in transitions else None,
-                scene_filter
-            ] if f != None]))
-        applied_filters.append(
-            filter.format(
-                n = ind,
-                df=scene_duration_f,
-                dt=scene_duration, 
-                tt=TRANSITION_T, 
-                te=scene_duration-TRANSITION_T, 
-                w=width/2*2 if width != None else -2 if height != None else OUTPUT_VIDEO_WIDTH, 
-                h=height/2*2 if height != None else -2 if width != None else OUTPUT_VIDEO_HEIGHT,
-            ))
-    # concatenate all video streams into a single stream
-    applied_filters.append("{tags} concat=n={count}:v=1:a=0 [video]".format(tags="".join(["[v{0}]".format(ind) for ind, x in enumerate(inputs)]), count=count))
+        audio_track = _get_audio(lenght_t, dir)
 
     if audio_track:
         # calculate number of loops for the audio track
@@ -157,7 +148,7 @@ def concat_videos(list, outdir=None, ffmpeg='ffmpeg', audio=True):
         # collect data for concatenated movie total duration
         length = time.strptime(re.findall("(?<=time\\=)[0-9.:]+", out)[-1],"%H:%M:%S.%f")
         lenght_t = datetime.timedelta(hours=length.tm_hour,minutes=length.tm_min,seconds=length.tm_sec).total_seconds()
-        audio_track = _get_audio(lenght_t)
+        audio_track = _get_audio(lenght_t, outdir)
         if audio_track:
             inputs = OrderedDict([(output, None)])
             applied_filters = ["[0:v]null[video]"]
@@ -186,7 +177,7 @@ def concat_videos(list, outdir=None, ffmpeg='ffmpeg', audio=True):
 
     return output
 
-def _get_audio(lenght):
+def _get_audio(lenght, outdir):
     try:
         # loads the index from url
         response = urllib2.urlopen(AUDIO_TRACKS_INDEX_URL)
@@ -195,13 +186,87 @@ def _get_audio(lenght):
         # extracts all suitable tracks
         audio_tracks = [(t["url"], t["length"]) for t in audio_tracks_index["tracks"] if (t["type"] == "track" and t["length"] <= lenght) or t["type"] == "loop"]
         random.shuffle(audio_tracks)
-
-        return next(iter(audio_tracks))
+        track = next(iter(audio_tracks)) 
+        return (_download_file(track[0], outdir), track[1])
     except:
         # if we fail to select audio track we log error message and continue
         print("Failed to select audio track: ", sys.exc_info()[0])
 
     return None
+
+def _download_file(pars):
+    result = None
+    url = pars[0]
+    outdir = pars[1]
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
+    try:
+        r = urllib2.urlopen(url)
+        if r.getcode() == 200:
+            file = os.path.normpath(os.path.join(outdir, str(uuid.uuid4())))
+            with open(file,'wb+') as o:
+              o.write(r.read())
+            result = file
+    except:
+        print traceback.format_exc(sys.exc_info())
+    return result
+
+if __name__ == "__main__":
+    list = [
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=1",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=2",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=3",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=4",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=5",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=6",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=7",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=8",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=9",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=10",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=11",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=12",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=13",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=14",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=15",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=16",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=17",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=18",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=19",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=20",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=21",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=22",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=23",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=24",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=25",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=26",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=27",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=28",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=29",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=30",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=31",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=32",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=33",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=34",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=35",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=36",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=37",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=38",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=39",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=40",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=41",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=42",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=43",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=44",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=45",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=46",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=47",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=48",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=49",
+        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=50"
+    ]
+    t=time.time()
+    make_from_url_list(list, transition = "fadeinout", outdir = "c:\\temp", audio=False, width=793, height=613)
+    print "finished for %d seconds" % (time.time() - t)
 
 #if __name__ == "__main__":
 #    list = [

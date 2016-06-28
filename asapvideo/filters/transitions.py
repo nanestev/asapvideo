@@ -1,5 +1,5 @@
-from ..enum import IntEnum
-from asapvideo.filters import Filter, FilterExpressionsAccessor
+from enum import IntEnum
+from core import Filter, FilterExpressionsAccessor
 
 class SlideTransitionType(IntEnum):
     left_right = (1 << 1),
@@ -26,7 +26,7 @@ class SlideTransitionFilter(Filter):
         if direction & SlideTransitionType.right_left == SlideTransitionType.right_left:
             expressions.append("overlay=x='max(w-(t*w/{td})\,0)':shortest=1".format(td = transition_duration))
         if direction & SlideTransitionType.bottom_top == SlideTransitionType.bottom_top:
-            expressions.append("overlay=x='max(h-(t*h/{td})\,0)':shortest=1".format(td = transition_duration))
+            expressions.append("overlay=y='max(h-(t*h/{td})\,0)':shortest=1".format(td = transition_duration))
         self._expressions_accessor = FilterExpressionsAccessor(expressions, direction == SlideTransitionType.random)
 
     def generate(self, streams):
@@ -38,7 +38,7 @@ class SlideTransitionFilter(Filter):
         for s in streams[1:]:
             splitprev = splits[sprev] if sprev in splits else None
             split = splits[s] if s in splits else None
-            newstream = s + "st"
+            newstream = "st" + str(i)
             output.append(
                 "[{b}][{o}]{e}[{ns}]"
                 .format(

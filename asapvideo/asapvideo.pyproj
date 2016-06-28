@@ -5,7 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>5ccefc9b-e77c-43f6-a04a-2ec98b90985c</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>filters\transitions.py</StartupFile>
+    <StartupFile>asapvideo.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -26,6 +26,12 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="asapvideo.py" />
+    <Compile Include="filters\audio.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="filters\core.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="filters\effects.py">
       <SubType>Code</SubType>
     </Compile>

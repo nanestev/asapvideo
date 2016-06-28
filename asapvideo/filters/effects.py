@@ -1,4 +1,4 @@
-from filters import Filter, FilterExpressionsAccessor
+from core import Filter, FilterExpressionsAccessor
 
 class PanZoomEffectFilter(Filter):
     def __init__(self, frames):
