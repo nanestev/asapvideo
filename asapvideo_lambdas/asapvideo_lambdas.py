@@ -8,7 +8,7 @@ import math
 import json
 import traceback
 
-BATCH_SIZE = 10
+BATCH_SIZE = 20
 
 def process_request_handler(event, context):
     # iterate through all new records

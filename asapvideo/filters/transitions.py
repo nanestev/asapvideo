@@ -15,7 +15,8 @@ class SlideTransitionType(IntEnum):
     Slide transition filter builder
 """
 class SlideTransitionFilter(Filter):
-    def __init__(self, transition_duration, direction = SlideTransitionType.alternate):
+    def __init__(self, transition_duration, direction = SlideTransitionType.alternate, outstreamprefix="stf"):
+        super(self.__class__, self).__init__(outstreamprefix)
         expressions = []
         if isinstance(direction, SlideTransitionType) == False:
             direction = SlideTransitionType.alternate
@@ -38,7 +39,8 @@ class SlideTransitionFilter(Filter):
         for s in streams[1:]:
             splitprev = splits[sprev] if sprev in splits else None
             split = splits[s] if s in splits else None
-            newstream = "st" + str(i)
+            newstream = self._outstreamprefix
+            if i > 0: newstream += str(i)
             output.append(
                 "[{b}][{o}]{e}[{ns}]"
                 .format(
@@ -57,10 +59,11 @@ class SlideTransitionFilter(Filter):
     Fade in/out transition filter builder
 """
 class FadeTransitionFilter(Filter):
-    def __init__(self, transition_duration, total_duration):
+    def __init__(self, transition_duration, total_duration, outstreamprefix="ftf"):
+        super(self.__class__, self).__init__(outstreamprefix)
         self._expressions_accessor = FilterExpressionsAccessor([
             "fade=t=in:st=0:d={tt},fade=t=out:st={te}:d={tt}".format(tt = transition_duration, te = total_duration - transition_duration)
         ])
 
     def generate(self, streams):
-        return self._generate_base(streams, "ft", self._expressions_accessor)
+        return self._generate_base(streams, self._expressions_accessor)
