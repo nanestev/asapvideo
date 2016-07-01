@@ -12,7 +12,7 @@ BATCH_SIZE = 20
 
 def process_request_handler(event, context):
     # iterate through all new records
-    for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'INSERT']:
+    for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'INSERT' and 'urls' in r['dynamodb']['NewImage']]:
         id = record['id']['S']
         list = asapvideo.get_valid_media_urls_only([o['M']['url']['S'] for o in sorted(record['urls']['L'], key=lambda url: int(url['M']['pos']['N']))], 'image')
         scene_duration = int(record['scene_duration']['N']) if 'scene_duration' in record else asapvideo.SCENE_DURATION_T
@@ -31,7 +31,7 @@ def process_request_handler(event, context):
                 message = json.dumps(clear_dict({
                     "id": id,
                     "batch": i + 1,
-                    "urls": list[i*10:(i+1)*10],
+                    "urls": list[i*BATCH_SIZE:(i+1)*BATCH_SIZE],
                     "scene_duration": scene_duration,
                     "width": width,
                     "height": height,
@@ -46,7 +46,7 @@ def process_request_handler(event, context):
                 )
 
     # iterate through all modified records
-    for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'MODIFY']:
+    for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'MODIFY' and 'urls' in r['dynamodb']['NewImage']]:
         # take those that are ready for final processment
         if  record['sts']['S'] == 'processing' and 'batches' in record and 'outputs' in record['batches']['M'] and int(record['batches']['M']['count']['N']) == len(record['batches']['M']['outputs']['L']):
             try:
