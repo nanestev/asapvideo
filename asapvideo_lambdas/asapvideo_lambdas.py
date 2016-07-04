@@ -31,7 +31,7 @@ def process_request_handler(event, context):
                 message = json.dumps(clear_dict({
                     "id": id,
                     "batch": i + 1,
-                    "urls": list[i*BATCH_SIZE:(i+1)*BATCH_SIZE],
+                    "urls": list[max(i*BATCH_SIZE, 0):(i+1)*BATCH_SIZE],
                     "scene_duration": scene_duration,
                     "width": width,
                     "height": height,
@@ -96,7 +96,8 @@ def process_batch_handler(event, context):
                 height = int(record['height']) if 'height' in record else None,
                 transition = record['transition'] if 'transition' in record else None,
                 effect = record['effect'] if 'effect' in record else None,
-                audio = bool(record['audio']) if 'audio' in record else True)
+                audio = bool(record['audio']) if 'audio' in record else True,
+                batch_mode = asapvideo.BatchMode.initial_batch if batch == 1 else asapvideo.BatchMode.non_initial_batch)
 
             if file == None:
                 raise Exception("No output video was created for request %s batch %d" % (id, batch))

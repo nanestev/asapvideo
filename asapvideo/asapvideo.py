@@ -14,7 +14,7 @@ import datetime
 import time
 import traceback
 from filters import PanZoomEffectFilter, FadeTransitionFilter, SlideTransitionFilter, ConcatFilter, ImageSlideFilter, FilterChain, ReplicateAudioFilter, TrimAudioFilter, FadeOutAudioFilter
-import multiprocessing
+from enum import IntEnum
 
 FPS = 25
 SCENE_DURATION_T = 5
@@ -23,6 +23,11 @@ OUTPUT_VIDEO_WIDTH = 1200
 OUTPUT_VIDEO_HEIGHT = 800
 AUDIO_FADE_OUT_T = 5
 AUDIO_TRACKS_INDEX_URL = "https://s3.amazonaws.com/asapvideo/audio/tracks.json"
+
+class BatchMode(IntEnum):
+    none = 0,
+    initial_batch = 1,
+    non_initial_batch = 2
 
 def get_valid_media_urls_only(list, content_type = None):
     regex = r'('
@@ -58,32 +63,42 @@ def get_valid_media_urls_only(list, content_type = None):
     return result
     
 
-def make_from_dir(dir, scene_duration = SCENE_DURATION_T, outdir=dir, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None):
+def make_from_dir(dir, scene_duration = SCENE_DURATION_T, outdir=dir, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None, batch_mode=BatchMode.none):
     # add all image files in the folder as input
-    return _make([ff for ff in [os.path.join(dir,f) for f in os.listdir(dir)] if imghdr.what(ff) != None], scene_duration, outdir, ffmpeg, width, height, audio, effect, transition)
+    return _make([ff for ff in [os.path.join(dir,f) for f in os.listdir(dir)] if imghdr.what(ff) != None], scene_duration, outdir, ffmpeg, width, height, audio, effect, transition, batch_mode)
 
-def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None):
+def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None, batch_mode=BatchMode.none):
     dir = outdir if outdir else os.path.dirname(os.path.realpath(__file__))
     l = _download_file_list(list, dir)
-    return _make(l, scene_duration, dir, ffmpeg, width, height, audio, effect, transition)
+    return _make(l, scene_duration, dir, ffmpeg, width, height, audio, effect, transition, batch_mode)
 
-def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, transition):
+def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, transition, batch_mode):
     # exit if no images were found
     if bool(images) == False:
         return None
 
-    inputs = OrderedDict([(i, "-loop 1") for i in images])
-    count = len(inputs)
     scene_duration_f = scene_duration * FPS
-    # calculate the length of the whole video
-    lenght_t = scene_duration*count
     effects = {"zoompan": PanZoomEffectFilter(scene_duration_f)}
-    transitions = {"fadeinout": FadeTransitionFilter(TRANSITION_T, scene_duration), "slidein": SlideTransitionFilter(TRANSITION_T)}
+    transitions = {"fadeinout": FadeTransitionFilter(TRANSITION_T, scene_duration), "slidein": SlideTransitionFilter(TRANSITION_T, preserve_first = batch_mode != BatchMode.non_initial_batch)}
+
+    # determines if transition is requested and how to interpret the inputs list
+    transitionFilter = transitions[transition] if transition in transitions else None
+    if batch_mode != BatchMode.non_initial_batch:
+        slides = images
+        lenght_t = scene_duration * len(slides)
+    elif transitionFilter and transitionFilter.needs_prev_slide():
+        slides = images
+        lenght_t = scene_duration * (len(slides) - 1)
+    else:
+        slides = images[1:]
+        lenght_t = scene_duration * len(slides)
+               
+    inputs = OrderedDict([(i, "-loop 1") for i in slides])
 
     # create the video filter chain
     videoseq = FilterChain([ImageSlideFilter(scene_duration, width/2*2 if width != None else -2 if height != None else OUTPUT_VIDEO_WIDTH, height/2*2 if height != None else -2 if width != None else OUTPUT_VIDEO_HEIGHT)])
-    if transition in transitions: 
-        videoseq.append(transitions[transition])
+    if transitionFilter: 
+        videoseq.append(transitionFilter)
     if effect in effects: 
         videoseq.append(effects[effect])
     videoseq.append(ConcatFilter(True, "video"))
@@ -99,7 +114,7 @@ def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, tra
             TrimAudioFilter(length = lenght_t),
             FadeOutAudioFilter(start = lenght_t-AUDIO_FADE_OUT_T, length = AUDIO_FADE_OUT_T, outstreamprefix="audio")
         ])
-        applied_filters += audioseq.generate(["%d:a" % count])[0]
+        applied_filters += audioseq.generate(["%d:a" % len(inputs)])[0]
         # add the audio track to the inputs collection
         inputs.update({audio_track[0]: None})
 
@@ -199,11 +214,17 @@ def _download_file(pars):
     result = None
     url = pars[0]
     outdir = pars[1]
+    retries = 0
+
     if not os.path.exists(outdir):
         os.makedirs(outdir)
-    try:
-        r = urllib2.urlopen(url)
-        if r.getcode() == 200:
+
+    while retries < 3:
+        time.sleep(retries)
+        retries += 1
+        r = None
+        try:
+            r = urllib2.urlopen(url)
             file = os.path.normpath(os.path.join(outdir, str(uuid.uuid4())))
             with open(file,'wb+') as o:
                 while True:
@@ -211,10 +232,13 @@ def _download_file(pars):
                     if not data: break
                     o.write(data)
             result = file
-    except:
-        print traceback.format_exc(sys.exc_info())
-    finally:
-        r.close()
+            break
+        except:
+            print traceback.format_exc(sys.exc_info())
+            if retries == 3: raise
+        finally:
+            if r: r.close()
+            
     return result
 
 def _download_file_list(list, outdir):
@@ -228,64 +252,70 @@ def _download_file_list(list, outdir):
 #        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=2",
 #        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=3",
 #        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=4",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=5",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=6",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=7",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=8",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=9",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=10",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=11",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=12",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=13",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=14",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=15",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=16",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=17",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=18",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=19",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=20",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=21",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=22",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=23",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=24",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=25",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=26",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=27",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=28",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=29",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=30",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=31",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=32",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=33",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=34",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=35",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=36",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=37",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=38",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=39",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=40",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=41",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=42",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=43",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=44",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=45",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=46",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=47",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=48",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=49",
-#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=50"
+#        "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=5"
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=6",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=7",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=8",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=9",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=10",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=11",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=12",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=13",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=14",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=15",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=16",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=17",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=18",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=19",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=20",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=21",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=22",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=23",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=24",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=25",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=26",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=27",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=28",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=29",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=30",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=31",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=32",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=33",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=34",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=35",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=36",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=37",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=38",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=39",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=40",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=41",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=42",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=43",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=44",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=45",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=46",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=47",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=48",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=49",
+#        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=50"
 #    ]
 #    t=time.time()
-#    make_from_url_list(list, transition = "slidein", outdir = "c:\\temp", audio=True, width=793, height=613)
+#    make_from_url_list(list, transition = "fadeinout", outdir = "c:\\temp", audio=True, width=793, height=613, batch_mode = BatchMode.non_initial_batch)
 #    print "finished for %d seconds" % (time.time() - t)
 
 #if __name__ == "__main__":
 #    list = [
-#        "https://s3.amazonaws.com/asapvideo/video/tmp/0e4a1468-34a6-11e6-b49d-03a71b3fd792/video1.mp4",
-#        "https://s3.amazonaws.com/asapvideo/video/tmp/0e4a1468-34a6-11e6-b49d-03a71b3fd792/video2.mp4",
-#        "https://s3.amazonaws.com/asapvideo/video/tmp/0e4a1468-34a6-11e6-b49d-03a71b3fd792/video3.mp4",
-#        "https://s3.amazonaws.com/asapvideo/video/tmp/0e4a1468-34a6-11e6-b49d-03a71b3fd792/video4.mp4"
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/be4b2879-3fac-11e6-b83b-377abc4c5986/video1.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/be4b2879-3fac-11e6-b83b-377abc4c5986/video2.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/be4b2879-3fac-11e6-b83b-377abc4c5986/video3.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/be4b2879-3fac-11e6-b83b-377abc4c5986/video4.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/be4b2879-3fac-11e6-b83b-377abc4c5986/video5.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/be4b2879-3fac-11e6-b83b-377abc4c5986/video6.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/be4b2879-3fac-11e6-b83b-377abc4c5986/video7.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/be4b2879-3fac-11e6-b83b-377abc4c5986/video8.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/be4b2879-3fac-11e6-b83b-377abc4c5986/video9.mp4",
+#        "https://s3.amazonaws.com/asapvideo/video/tmp/be4b2879-3fac-11e6-b83b-377abc4c5986/video10.mp4"
 #    ]
 #    t=time.time()
-#    concat_videos(list, audio=True, outdir = "c:\\temp")
+#    concat_videos(list, audio=False, outdir = "c:\\temp")
 #    print "finished for %d seconds" % (time.time() - t)

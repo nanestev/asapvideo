@@ -1,6 +1,17 @@
 from enum import IntEnum
 from core import Filter, FilterExpressionsAccessor
 
+"""
+    Base transition filter class
+"""
+class TransitionFilter(Filter):
+    def needs_prev_slide(self):
+        raise NotImplementedError("Subclasses should implement this!")
+
+
+"""
+    Slide transitions types
+"""
 class SlideTransitionType(IntEnum):
     left_right = (1 << 1),
     right_left = (1 << 2),
@@ -11,11 +22,12 @@ class SlideTransitionType(IntEnum):
     alternate = (horizontal_alternate[0] | vertical_alternate[0]),
     random = (alternate[0] | 1 << 0)
 
+
 """
     Slide transition filter builder
 """
-class SlideTransitionFilter(Filter):
-    def __init__(self, transition_duration, direction = SlideTransitionType.alternate, outstreamprefix="stf"):
+class SlideTransitionFilter(TransitionFilter):
+    def __init__(self, transition_duration, preserve_first, direction = SlideTransitionType.alternate, outstreamprefix="stf"):
         super(self.__class__, self).__init__(outstreamprefix)
         expressions = []
         if isinstance(direction, SlideTransitionType) == False:
@@ -29,13 +41,16 @@ class SlideTransitionFilter(Filter):
         if direction & SlideTransitionType.bottom_top == SlideTransitionType.bottom_top:
             expressions.append("overlay=y='max(h-(t*h/{td})\,0)':shortest=1".format(td = transition_duration))
         self._expressions_accessor = FilterExpressionsAccessor(expressions, direction == SlideTransitionType.random)
+        self._preserve_first = preserve_first
 
     def generate(self, streams):
         newstreams = []
-        splits = dict([(s, (s+"a", s+"b")) for s in streams[1:len(streams)-1]])
+        split_from_inx = 0 if self._preserve_first == True else 1
+        splits = dict([(s, (s+"a", s+"b")) for s in streams[split_from_inx:len(streams)-1]])
         output = ["[{k}]split[{va}][{vb}]".format(k = k, va = v[0], vb = v[1]) for (k, v) in splits.iteritems()]
         sprev = streams[0]
         i = 0
+        if self._preserve_first == True: newstreams.append(splits[streams[0]][0])
         for s in streams[1:]:
             splitprev = splits[sprev] if sprev in splits else None
             split = splits[s] if s in splits else None
@@ -54,11 +69,14 @@ class SlideTransitionFilter(Filter):
             i += 1
         return output, newstreams
 
+    def needs_prev_slide(self):
+        return True
+
 
 """
     Fade in/out transition filter builder
 """
-class FadeTransitionFilter(Filter):
+class FadeTransitionFilter(TransitionFilter):
     def __init__(self, transition_duration, total_duration, outstreamprefix="ftf"):
         super(self.__class__, self).__init__(outstreamprefix)
         self._expressions_accessor = FilterExpressionsAccessor([
@@ -67,3 +85,6 @@ class FadeTransitionFilter(Filter):
 
     def generate(self, streams):
         return self._generate_base(streams, self._expressions_accessor)
+
+    def needs_prev_slide(self):
+        return False
