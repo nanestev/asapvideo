@@ -31,7 +31,7 @@ def process_request_handler(event, context):
                 message = json.dumps(clear_dict({
                     "id": id,
                     "batch": i + 1,
-                    "urls": list[max(i*BATCH_SIZE, 0):(i+1)*BATCH_SIZE],
+                    "urls": list[max((i*BATCH_SIZE)-1, 0):(i+1)*BATCH_SIZE],
                     "scene_duration": scene_duration,
                     "width": width,
                     "height": height,
