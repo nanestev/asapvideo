@@ -13,7 +13,7 @@ import uuid
 import datetime
 import time
 import traceback
-from filters import PanZoomEffectFilter, FadeTransitionFilter, SlideTransitionFilter, ConcatFilter, ImageSlideFilter, FilterChain, ReplicateAudioFilter, TrimAudioFilter, FadeOutAudioFilter
+from filters import CombiningFilter, PanZoomEffectFilter, ImageSlideFilter, FadeTransitionFilter, FilterChain, SlideTransitionFilter, ConcatFilter, ReplicateAudioFilter, TrimAudioFilter, FadeOutAudioFilter
 from enum import IntEnum
 
 FPS = 25
@@ -23,6 +23,7 @@ OUTPUT_VIDEO_WIDTH = 1200
 OUTPUT_VIDEO_HEIGHT = 800
 AUDIO_FADE_OUT_T = 5
 AUDIO_TRACKS_INDEX_URL = "https://s3.amazonaws.com/asapvideo/audio/tracks.json"
+MAX_ZOOM = 1.0565
 
 class BatchMode(IntEnum):
     none = 0,
@@ -78,15 +79,56 @@ def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, tra
         return None
 
     scene_duration_f = scene_duration * FPS
-    effects = {"zoompan": PanZoomEffectFilter(scene_duration_f)}
-    transitions = {"fadeinout": FadeTransitionFilter(TRANSITION_T, scene_duration), "slidein": SlideTransitionFilter(TRANSITION_T, preserve_first = batch_mode != BatchMode.non_initial_batch)}
+    w = width/2*2 if width != None else -2 if height != None else OUTPUT_VIDEO_WIDTH
+    h = height/2*2 if height != None else -2 if width != None else OUTPUT_VIDEO_HEIGHT
+
+    # build the animation dictionary of filters and first slide handling flag
+    animations = {
+        "zoompan": (
+            CombiningFilter(
+                [
+                    PanZoomEffectFilter(maxzoom = MAX_ZOOM, frames = scene_duration_f),
+                    ImageSlideFilter(duration = scene_duration, width = w, height = h)
+                ],
+                outstreamprefix = "zpaf"),
+            False
+        ),
+        "fadeinout": (
+            CombiningFilter([
+                    FadeTransitionFilter(transition_duration = TRANSITION_T, total_duration = scene_duration),
+                    ImageSlideFilter(duration = scene_duration, width = w, height = h)
+                ],
+                outstreamprefix = "faf"),
+            False
+        ),
+        "zoompanfadeinout": (
+            CombiningFilter(
+                [
+                    PanZoomEffectFilter(maxzoom = MAX_ZOOM, frames = scene_duration_f),
+                    FadeTransitionFilter(transition_duration = TRANSITION_T, total_duration = scene_duration),
+                    ImageSlideFilter(duration = scene_duration, width = w, height = h)
+                ],
+                outstreamprefix = "zpfaf"),
+            False
+        ),
+        "slidein": (
+            FilterChain(
+                [
+                    ImageSlideFilter(duration = scene_duration, width = w, height = h),
+                    SlideTransitionFilter(transition_duration = TRANSITION_T, preserve_first = batch_mode != BatchMode.non_initial_batch)
+                ]),
+            True
+        )
+    }
+    animationkey = (effect if effect else "") + (transition if transition else "")
+    animation = animations[animationkey] if animationkey in animations else None
 
     # determines if transition is requested and how to interpret the inputs list
-    transitionFilter = transitions[transition] if transition in transitions else None
+    preserve_first_slide = animation[1] if animation else False
     if batch_mode != BatchMode.non_initial_batch:
         slides = images
         lenght_t = scene_duration * len(slides)
-    elif transitionFilter and transitionFilter.needs_prev_slide():
+    elif preserve_first_slide:
         slides = images
         lenght_t = scene_duration * (len(slides) - 1)
     else:
@@ -96,11 +138,11 @@ def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, tra
     inputs = OrderedDict([(i, "-loop 1") for i in slides])
 
     # create the video filter chain
-    videoseq = FilterChain([ImageSlideFilter(scene_duration, width/2*2 if width != None else -2 if height != None else OUTPUT_VIDEO_WIDTH, height/2*2 if height != None else -2 if width != None else OUTPUT_VIDEO_HEIGHT)])
-    if transitionFilter: 
-        videoseq.append(transitionFilter)
-    if effect in effects: 
-        videoseq.append(effects[effect])
+    videoseq = FilterChain()
+    if animation: 
+        videoseq.append(animation[0])
+    else:
+        videoseq.append(ImageSlideFilter(duration = scene_duration, width = w, height = h))
     videoseq.append(ConcatFilter(True, "video"))
     applied_filters = videoseq.generate(["%d:v" % i for (i,x) in enumerate(inputs)])[0]
     
@@ -300,7 +342,7 @@ def _download_file_list(list, outdir):
 #        #"https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=50"
 #    ]
 #    t=time.time()
-#    make_from_url_list(list, transition = "fadeinout", outdir = "c:\\temp", audio=True, width=793, height=613, batch_mode = BatchMode.non_initial_batch)
+#    make_from_url_list(list, transition = "slidein", outdir = "c:\\temp", audio=True, width=793, height=613, batch_mode = BatchMode.none)
 #    print "finished for %d seconds" % (time.time() - t)
 
 #if __name__ == "__main__":

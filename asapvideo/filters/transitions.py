@@ -1,12 +1,5 @@
 from enum import IntEnum
-from core import Filter, FilterExpressionAccessor
-
-"""
-    Base transition filter class
-"""
-class TransitionFilter(Filter):
-    def needs_prev_slide(self):
-        raise NotImplementedError("Subclasses should implement this!")
+from core import Filter, FilterExpressionAccessor, Combinable
 
 
 """
@@ -26,21 +19,21 @@ class SlideTransitionType(IntEnum):
 """
     Slide transition filter builder
 """
-class SlideTransitionFilter(TransitionFilter):
-    def __init__(self, transition_duration, preserve_first, direction = SlideTransitionType.alternate, outstreamprefix="stf"):
+class SlideTransitionFilter(Filter):
+    def __init__(self, transition_duration, preserve_first, type = SlideTransitionType.alternate, outstreamprefix="stf"):
         super(self.__class__, self).__init__(outstreamprefix)
         expressions = []
-        if isinstance(direction, SlideTransitionType) == False:
-            direction = SlideTransitionType.alternate
-        if direction & SlideTransitionType.left_right == SlideTransitionType.left_right:
+        if isinstance(type, SlideTransitionType) == False:
+            type = SlideTransitionType.alternate
+        if type & SlideTransitionType.left_right == SlideTransitionType.left_right:
             expressions.append("overlay=x='min(-w+(t*w/{td})\,0)':shortest=1".format(td = transition_duration))
-        if direction & SlideTransitionType.top_bottom == SlideTransitionType.top_bottom:
+        if type & SlideTransitionType.top_bottom == SlideTransitionType.top_bottom:
             expressions.append("overlay=y='min(-h+(t*h/{td})\,0)':shortest=1".format(td = transition_duration))
-        if direction & SlideTransitionType.right_left == SlideTransitionType.right_left:
+        if type & SlideTransitionType.right_left == SlideTransitionType.right_left:
             expressions.append("overlay=x='max(w-(t*w/{td})\,0)':shortest=1".format(td = transition_duration))
-        if direction & SlideTransitionType.bottom_top == SlideTransitionType.bottom_top:
+        if type & SlideTransitionType.bottom_top == SlideTransitionType.bottom_top:
             expressions.append("overlay=y='max(h-(t*h/{td})\,0)':shortest=1".format(td = transition_duration))
-        self._expressions_accessor = FilterExpressionAccessor(expressions, direction == SlideTransitionType.random)
+        self._expressions_accessor = FilterExpressionAccessor(expressions, type == SlideTransitionType.random)
         self._preserve_first = preserve_first
 
     def generate(self, streams):
@@ -69,22 +62,16 @@ class SlideTransitionFilter(TransitionFilter):
             i += 1
         return output, newstreams
 
-    def needs_prev_slide(self):
-        return True
-
 
 """
     Fade in/out transition filter builder
 """
-class FadeTransitionFilter(TransitionFilter):
+class FadeTransitionFilter(Filter, Combinable):
     def __init__(self, transition_duration, total_duration, outstreamprefix="ftf"):
-        super(self.__class__, self).__init__(outstreamprefix)
-        self._expressions_accessor = FilterExpressionAccessor([
+        Filter.__init__(self, outstreamprefix)
+        Combinable.__init__(self, FilterExpressionAccessor([
             "fade=t=in:st=0:d={tt},fade=t=out:st={te}:d={tt}".format(tt = transition_duration, te = total_duration - transition_duration)
-        ])
+        ]))
 
     def generate(self, streams):
-        return self._generate_base(streams, self._expressions_accessor)
-
-    def needs_prev_slide(self):
-        return False
+        return self._generate_base(streams, self.get_accessor())
