@@ -1,5 +1,5 @@
 from enum import IntEnum
-from core import Filter, FilterExpressionsAccessor
+from core import Filter, FilterExpressionAccessor
 
 """
     Base transition filter class
@@ -40,7 +40,7 @@ class SlideTransitionFilter(TransitionFilter):
             expressions.append("overlay=x='max(w-(t*w/{td})\,0)':shortest=1".format(td = transition_duration))
         if direction & SlideTransitionType.bottom_top == SlideTransitionType.bottom_top:
             expressions.append("overlay=y='max(h-(t*h/{td})\,0)':shortest=1".format(td = transition_duration))
-        self._expressions_accessor = FilterExpressionsAccessor(expressions, direction == SlideTransitionType.random)
+        self._expressions_accessor = FilterExpressionAccessor(expressions, direction == SlideTransitionType.random)
         self._preserve_first = preserve_first
 
     def generate(self, streams):
@@ -79,7 +79,7 @@ class SlideTransitionFilter(TransitionFilter):
 class FadeTransitionFilter(TransitionFilter):
     def __init__(self, transition_duration, total_duration, outstreamprefix="ftf"):
         super(self.__class__, self).__init__(outstreamprefix)
-        self._expressions_accessor = FilterExpressionsAccessor([
+        self._expressions_accessor = FilterExpressionAccessor([
             "fade=t=in:st=0:d={tt},fade=t=out:st={te}:d={tt}".format(tt = transition_duration, te = total_duration - transition_duration)
         ])
 
