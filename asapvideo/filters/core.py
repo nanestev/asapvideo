@@ -169,3 +169,25 @@ class FilterChain(Filter):
             output += res[0]
             newstreams = res[1]
         return output, newstreams
+
+"""
+    Video split filter
+"""
+class VideoSplitFilter(Filter):
+    def __init__(self, count, outstreamprefix = "vsf"):
+        super(self.__class__, self).__init__(outstreamprefix = outstreamprefix)
+        self._count = count
+        self._names = ['a', 'b', 'b', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'x', 'y', 'z']
+
+    def generate(self, streams):
+        output = []
+        newstreams = []
+        for s in streams:
+            new = [self._outstreamprefix + self._names[i] for i in range(0,self._count)]
+            newstreams += new
+            output.append("[{s}]split={c}{ns}".format(
+                s = s,
+                c = self._count,
+                ns = "".join(["[%s]" % ns for ns in new])
+            ))
+        return output, newstreams
