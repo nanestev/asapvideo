@@ -1,2 +1,5 @@
-asapvideo/asapvideo.pyc
-asapvideo/video.mp4
+*.suo
+*.pyc
+*.mp4
+package/*
+!package/ffmpeg
