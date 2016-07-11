@@ -28,6 +28,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="asapvideo_lambdas.py" />
+    <Compile Include="asapvideo_lambdas_tests.py">
+      <SubType>Code</SubType>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\asapvideo\asapvideo.pyproj">

@@ -26,6 +26,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="asapvideo.py" />
+    <Compile Include="asapvideo_tests.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="filters\audio.py">
       <SubType>Code</SubType>
     </Compile>
@@ -36,6 +39,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="filters\transitions.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="filters\utils.py">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="filters\__init__.py">

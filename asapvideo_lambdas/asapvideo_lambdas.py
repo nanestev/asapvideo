@@ -9,6 +9,9 @@ import json
 import traceback
 
 BATCH_SIZE = 20
+BATCHES_SNS_TOPIC = 'arn:aws:sns:us-east-1:419956479724:asapvideo-batches'
+S3_BUCKET = 'asapvideo'
+DYNAMODB_TABLE = 'asapvideo'
 
 def process_request_handler(event, context):
     # iterate through all new records
@@ -40,7 +43,7 @@ def process_request_handler(event, context):
                     "audio": False
                 }), separators=(',', ':'))
                 response = sns.publish(
-                    TopicArn='arn:aws:sns:us-east-1:419956479724:asapvideo-batches',
+                    TopicArn=BATCHES_SNS_TOPIC,
                     Message=message,
                     Subject='SubmitBatch'
                 )
@@ -116,14 +119,14 @@ def upload_to_s3(file, name):
         s3 = boto3.client('s3')
         transfer = boto3.s3.transfer.S3Transfer(s3)
         key = 'video/{name}{ext}'.format(name=name, ext=os.path.splitext(file)[1]) 
-        transfer.upload_file(file, 'asapvideo', key, extra_args={'ACL': 'public-read'})
-        video = "https://s3.amazonaws.com/asapvideo/" + key
+        transfer.upload_file(file, S3_BUCKET, key, extra_args={'ACL': 'public-read'})
+        video = "https://s3.amazonaws.com/%s/%s" % (S3_BUCKET,key)
     return video
 
 
 def update_record(id, values):
     dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table('asapvideo')
+    table = dynamodb.Table(DYNAMODB_TABLE)
     table.update_item(
         Key={'id': id},
         UpdateExpression='SET ' + ",".join(["{field} = :{field}".format(field = key) for key in values.iterkeys()]),
@@ -133,7 +136,7 @@ def update_record(id, values):
 
 def add_output(id, batch, output):
     dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table('asapvideo')
+    table = dynamodb.Table(DYNAMODB_TABLE)
     table.update_item(
         Key={'id': id},
         UpdateExpression='SET batches.outputs=list_append(if_not_exists(batches.outputs, :l), :o)',
@@ -159,198 +162,3 @@ def clear_dict(d):
         elif isinstance(value, dict):
             del_none(value)
     return d
-
-#if __name__ == "__main__":
-#    event = {
-#        "Records": [
-#            {
-#                "eventName": "INSERT",
-#                "dynamodb": {
-#                    "NewImage": {
-#                        "id": {
-#                            "S": "some-id"
-#                        },
-#                        "urls": {
-#                            "SS": [
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=1",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=2",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=3",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=4",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=5",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=6",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=7",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=8",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=9",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=10",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=11",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=12",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=13",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=14",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=15",
-#                            ]
-#                        }
-#                    }
-#                }
-#            }
-#        ]
-#    }
-#    process_request_handler(event, None)
-
-#if __name__ == "__main__":
-#    event = {
-#        "Records": [
-#            {
-#                "eventName": "MODIFY",
-#                "dynamodb": {
-#                    "NewImage": {
-#                        "batches": {
-#                        "M": {
-#                            "count": {
-#                            "N": "4"
-#                            },
-#                            "outputs": {
-#                            "L": [
-#                                {
-#                                "M": {
-#                                    "batch": {
-#                                        "N": "4"
-#                                    },
-#                                    "output": {
-#                                        "S": "https://s3.amazonaws.com/asapvideo/video/tmp/833195d7-34a2-11e6-a74f-c1036123a238/video4.mp4"
-#                                    }
-#                                }
-#                                },
-#                                {
-#                                "M": {
-#                                    "batch": {
-#                                        "N": "3"
-#                                    },
-#                                    "output": {
-#                                        "S": "https://s3.amazonaws.com/asapvideo/video/tmp/833195d7-34a2-11e6-a74f-c1036123a238/video3.mp4"
-#                                    }
-#                                }
-#                                },
-#                                {
-#                                "M": {
-#                                    "batch": {
-#                                        "N": "1"
-#                                    },
-#                                    "output": {
-#                                        "S": "https://s3.amazonaws.com/asapvideo/video/tmp/833195d7-34a2-11e6-a74f-c1036123a238/video1.mp4"
-#                                    }
-#                                }
-#                                },
-#                                {
-#                                "M": {
-#                                    "batch": {
-#                                        "N": "2"
-#                                    },
-#                                    "output": {
-#                                        "S": "https://s3.amazonaws.com/asapvideo/video/tmp/833195d7-34a2-11e6-a74f-c1036123a238/video2.mp4"
-#                                    }
-#                                }
-#                                }
-#                            ]
-#                            }
-#                        }
-#                        },
-#                        "callback_url": {
-#                            "S": "http://www.styloko.com"
-#                        },
-#                        "email": {
-#                            "S": "myemail@gmail.com"
-#                        },
-#                        "height": {
-#                            "N": "613"
-#                        },
-#                        "id": {
-#                            "S": "833195d7-34a2-11e6-a74f-c1036123a238"
-#                        },
-#                        "scene_duration": {
-#                            "N": "5"
-#                        },
-#                        "sts": {
-#                            "S": "processing"
-#                        },
-#                        "transition": {
-#                            "S": "fadeinout"
-#                        },
-#                        "urls": {
-#                            "SS": [
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=1",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=10",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=11",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=12",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=13",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=14",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=15",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=16",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=17",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=18",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=19",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=2",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=20",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=21",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=22",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=23",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=24",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=25",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=26",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=27",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=28",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=29",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=3",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=30",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=31",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=32",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=33",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=34",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=35",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=4",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=5",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=6",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=7",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=8",
-#                                "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=9"
-#                            ]
-#                        },
-#                        "user_data": {
-#                            "S": "my data"
-#                        },
-#                        "width": {
-#                            "N": "793"
-#                        }
-#                    }
-#                }
-#            }
-#        ]
-#    }
-#    process_request_handler(event, None)
-
-
-#if __name__ == "__main__":
-#    event = {
-#        "Records": [
-#            {
-#                "Sns": {
-#                    "Message": json.dumps({
-#                        "id": "some-id",
-#                        "batch": 1, 
-#                        "urls": [
-#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=1",
-#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=2",
-#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=3",
-#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=4",
-#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=5",
-#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=6",
-#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=7",
-#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=8",
-#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=9",
-#                            "https://printastic-pdfpreview.imgix.net/796092bcda15-b7c91f455aea4ba698281cb3e0478e4a.pdf?page=10",
-#                        ]
-#                    })
-#                }
-#            }
-#        ]
-#    }
-#    process_batch_handler(event, None)
