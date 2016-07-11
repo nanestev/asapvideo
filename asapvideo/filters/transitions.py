@@ -2,6 +2,7 @@ import math
 from enum import IntEnum
 from core import Filter, FilterExpressionAccessor, Combinable, VideoSplitFilter, CombiningFilter, ImageSlideFilter, ConcatFilter
 from effects import ZoompanEffectFilter
+from utils import pairwise
 
 """
     Fade in/out transition filter builder
@@ -53,21 +54,18 @@ class SlidingOverlayFilter(Filter):
     def generate(self, streams):
         newstreams = []
         output = []
-        prev = streams[0]
         i = 0
-        for s in streams[1:]:
+        for s1, s2 in pairwise(streams):
             newstream = self._outstreamprefix
             if i > 0: newstream += str(i)
             output.append(
-                "[{b}][{o}]{e}[{ns}]"
-                .format(
-                    b = prev, 
-                    o = s,
+                "[{b}][{o}]{e}[{ns}]".format(
+                    b = s1, 
+                    o = s2,
                     e = self._expressions_accessor.get_expression(i),
                     ns = newstream)
             )
             newstreams.append(newstream)
-            prev = s
             i += 1
         return output, newstreams
 
@@ -101,7 +99,7 @@ class SlideTransitionFilter(Filter):
             slides.append(splitprev[1] if splitprev else sprev)
             slides.append(split[0] if split else s)
             sprev = s
-        trans = SlidingOverlayFilter(self._transition_duration, self._type, newstream).generate(slides)
+        trans = SlidingOverlayFilter(self._transition_duration, self._type).generate(slides)
         return output + trans[0], newstreams + trans[1]
 
 
@@ -109,58 +107,59 @@ class SlideTransitionFilter(Filter):
     Class that renders zoompan plus slide in transition filters
 """
 class ZoompanSlideInTransitionFilter(Filter):
-    def __init__(self, transition_duration, total_duration, fps, width, height, maxzoom, outstreamprefix="ftf"):
+    def __init__(self, transition_duration, total_duration, fps, width, height, maxzoom, preserve_first, type = SlideTransitionType.alternate, outstreamprefix="ftf"):
         Filter.__init__(self, outstreamprefix)
         self._transition_duration = transition_duration
         self._total_duration = total_duration
         self._width = width
         self._height = height
         self._maxzoom = maxzoom
-        self._frames = int(math.ceil((total_duration - transition_duration) * fps))
+        self._slide_duration = total_duration - transition_duration
+        self._frames = int(math.ceil(self._slide_duration * fps))
+        self._preserve_first = preserve_first
+        self._type = type
 
     def generate(self, streams):
         output = []
-        to_concat = []
-        prev = None
-        i = 0
-        for s in streams:
+        newstreams = []
+        transitions = []
+        parts = []
+
+        s = streams[0]
+        if self._preserve_first == True:
             splitted = VideoSplitFilter(3, outstreamprefix = s.replace(":", "")).generate([s])
             output += splitted[0]
-            a = ImageSlideFilter(self._transition_duration, self._width, self._height).generate(splitted[1][0:0])
+            a = ImageSlideFilter(self._transition_duration, self._width, self._height, splitted[1][0] + "z").generate(splitted[1][0:1])
             output += a[0]
-            b = CombiningFilter([ZoompanEffectFilter(self._maxzoom, self._frames), ImageSlideFilter(self._transition_duration, self._width, self._height)]).generate(splitted[1][1:1])
+            b = CombiningFilter([ZoompanEffectFilter(self._maxzoom, self._frames), ImageSlideFilter(self._slide_duration, self._width, self._height)], splitted[1][1] + "z").generate(splitted[1][1:2])
             output += b[0]
-            c = CombiningFilter([ZoompanEffectFilter(self._maxzoom, 1), ImageSlideFilter(self._transition_duration, self._width, self._height)]).generate(splitted[1][2:2])
+            c = CombiningFilter([ZoompanEffectFilter(self._maxzoom, 1), ImageSlideFilter(self._transition_duration, self._width, self._height)], splitted[1][2] + "z").generate(splitted[1][2:3])
             output += c[0]
-            to_concat += b[1][0]
-            if prev:
-                tran = SlideTransitionFilter(transition_duration, False, "t" + str(i)).generate([prev[2], a[1][0]])
-                output += tran[0]
-                to_concat += tran[1][0]
             prev = (a[1][0], b[1][0], c[1][0])
-            i += 1
-        concatenated = ConcatFilter(True, "v").generate(to_concat)
-        output += concatenated[0]
-        return output, concatenated[1]
+            newstreams += [a[1][0], b[1][0]]
+        else:                       
+            c = CombiningFilter([ZoompanEffectFilter(self._maxzoom, 1), ImageSlideFilter(self._transition_duration, self._width, self._height)], s.replace(":", "") + "z").generate([s])
+            output += c[0]
+            prev = (c[1][0], c[1][0], c[1][0])
 
+        for s in streams[1:]:
+            splitted = VideoSplitFilter(3, outstreamprefix = s.replace(":", "")).generate([s])
+            output += splitted[0]
+            a = ImageSlideFilter(self._transition_duration, self._width, self._height, splitted[1][0] + "z").generate(splitted[1][0:1])
+            output += a[0]
+            b = CombiningFilter([ZoompanEffectFilter(self._maxzoom, self._frames), ImageSlideFilter(self._slide_duration, self._width, self._height)], splitted[1][1] + "z").generate(splitted[1][1:2])
+            output += b[0]
+            c = CombiningFilter([ZoompanEffectFilter(self._maxzoom, 1), ImageSlideFilter(self._transition_duration, self._width, self._height)], splitted[1][2] + "z").generate(splitted[1][2:3])
+            output += c[0]
+            transitions += [prev[2], a[1][0]]
+            parts.append([b[1][0]])
+            prev = (a[1][0], b[1][0], c[1][0])
 
-#ffmpeg -y ^
-#-loop 1 -i c:\temp\3c575c3d-6fdf-4cc1-a67b-3a61a0459744 ^
-#-loop 1 -i c:\temp\aec05d49-18d6-49a8-ad5b-1687628ce9e7 ^
-#-loop 1 -i c:\temp\b631229a-ad05-488c-b20c-44b0be01f5de ^
-#-filter_complex ^
-#"[0:v]split=3[0va][0vb][0vc];^
-#[1:v]split=3[1va][1vb][1vc];^
-#[2:v]split=3[2va][2vb][2vc];^
-#[0va]trim=duration=0.5,scale=792:612,setsar=1:1,setpts=PTS-STARTPTS[0vaz];^
-#[0vb]zoompan=z='min(zoom+0.0005,1.0565)':d=113,trim=duration=4.5,scale=792:612,setsar=1:1,setpts=PTS-STARTPTS[0vbz];^
-#[0vc]zoompan=z=1.0565:d=1,trim=duration=0.5,scale=792:612,setsar=1:1,setpts=PTS-STARTPTS[0vcz];^
-#[1va]trim=duration=0.5,scale=792:612,setsar=1:1,setpts=PTS-STARTPTS[1vaz];^
-#[1vb]zoompan=z='min(zoom+0.0005,1.0565)':d=113,trim=duration=4.5,scale=792:612,setsar=1:1,setpts=PTS-STARTPTS[1vbz];^
-#[1vc]zoompan=z=1.0565:d=1,trim=duration=0.5,scale=792:612,setsar=1:1,setpts=PTS-STARTPTS[1vcz];^
-#[2va]trim=duration=0.5,scale=792:612,setsar=1:1,setpts=PTS-STARTPTS[2vaz];^
-#[2vb]zoompan=z='min(zoom+0.0005,1.0565)':d=113,trim=duration=4.5,scale=792:612,setsar=1:1,setpts=PTS-STARTPTS[2vbz];^
-#[2vc]zoompan=z=1.0565:d=1,trim=duration=0.5,scale=792:612,setsar=1:1,setpts=PTS-STARTPTS[2vcz];^
-#[0vcz][1vaz]overlay=x='min(-w+(t*w/0.5)\,0)':shortest=1[t1];^
-#[1vcz][2vaz]overlay=x='min(-w+(t*w/0.5)\,0)':shortest=1[t2];^
-#[0vaz][0vbz][t1][1vbz][t2][2vbz][2vcz]concat=n=7:v=1:a=0[video]" -map [video] -c:v libx264 -pix_fmt yuvj420p -q:v 1 c:\temp/video.mp4
+        parts[-1].append(prev[2])
+        tran = SlidingOverlayFilter(self._transition_duration, self._type, "t").generate(transitions)
+        output += tran[0]
+        t = iter(tran[1])
+        for p in parts:
+            newstreams.append(next(t))
+            newstreams += p
+        return output, newstreams

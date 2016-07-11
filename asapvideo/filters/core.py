@@ -177,7 +177,7 @@ class VideoSplitFilter(Filter):
     def __init__(self, count, outstreamprefix = "vsf"):
         super(self.__class__, self).__init__(outstreamprefix = outstreamprefix)
         self._count = count
-        self._names = ['a', 'b', 'b', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'x', 'y', 'z']
+        self._names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'x', 'y', 'z']
 
     def generate(self, streams):
         output = []
