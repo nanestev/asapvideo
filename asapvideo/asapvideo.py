@@ -25,11 +25,18 @@ AUDIO_FADE_OUT_T = 5
 AUDIO_TRACKS_INDEX_URL = "https://s3.amazonaws.com/asapvideo/audio/tracks.json"
 MAX_ZOOM = 1.0565
 
+"""
+    Batch modes enumerator.
+"""
 class BatchMode(IntEnum):
     none = 0,
-    initial_batch = 1,
+    initial_batch = 1,  
     non_initial_batch = 2
 
+
+"""
+    Receives list of urls and returns the valid ones.
+"""
 def get_valid_media_urls_only(list, content_type = None):
     regex = r'('
     # Scheme (HTTP, HTTPS, FTP and SFTP):
@@ -64,15 +71,26 @@ def get_valid_media_urls_only(list, content_type = None):
     return result
     
 
+"""
+    Creates video from all image files found in the passed directory.
+"""
 def make_from_dir(dir, scene_duration = SCENE_DURATION_T, outdir=dir, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None, batch_mode=BatchMode.none):
     # add all image files in the folder as input
     return _make([ff for ff in [os.path.join(dir,f) for f in os.listdir(dir)] if imghdr.what(ff) != None], scene_duration, outdir, ffmpeg, width, height, audio, effect, transition, batch_mode)
 
+
+"""
+    Creates video from all urls passed as a url list.
+"""
 def make_from_url_list(list, scene_duration = SCENE_DURATION_T, outdir=None, ffmpeg='ffmpeg', width=None, height=None, audio=True, effect=None, transition=None, batch_mode=BatchMode.none):
     dir = outdir if outdir else os.path.dirname(os.path.realpath(__file__))
     l = _download_file_list(list, dir)
     return _make(l, scene_duration, dir, ffmpeg, width, height, audio, effect, transition, batch_mode)
 
+
+"""
+    Private method for creating video from list of local image files.
+"""
 def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, transition, batch_mode):
     # exit if no images were found
     if bool(images) == False:
@@ -177,6 +195,10 @@ def _make(images, scene_duration, dir, ffmpeg, width, height, audio, effect, tra
     ff.run()
     return output
 
+
+"""
+    Concatenates all video files passed as a url list.
+"""
 def concat_videos(list, outdir=None, ffmpeg='ffmpeg', audio=True):
     dir = outdir if outdir else os.path.dirname(os.path.realpath(__file__))
     videos = _download_file_list(list, dir)
@@ -232,6 +254,10 @@ def concat_videos(list, outdir=None, ffmpeg='ffmpeg', audio=True):
 
     return output
 
+
+"""
+    Private method that gets audio track from the AUDIO_TRACKS_INDEX_URL audio library by desired length.
+"""
 def _get_audio(lenght, outdir):
     try:
         # loads the index from url
@@ -256,6 +282,9 @@ def _get_audio(lenght, outdir):
 
     return None
 
+"""
+    Downloads single file and stores it locally. Function is designed to be used with parallel library.
+"""
 def _download_file(pars):
     result = None
     url = pars[0]
@@ -287,6 +316,10 @@ def _download_file(pars):
             
     return result
 
+
+"""
+    Downloads files from url list.
+"""
 def _download_file_list(list, outdir):
     #pool = multiprocessing.Pool(processes=4)
     #return pool.map(_download_file, [(u, outdir) for u in list])

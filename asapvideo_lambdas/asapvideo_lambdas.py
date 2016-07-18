@@ -13,8 +13,14 @@ BATCHES_SNS_TOPIC = 'arn:aws:sns:us-east-1:419956479724:asapvideo-batches'
 S3_BUCKET = 'asapvideo'
 DYNAMODB_TABLE = 'asapvideo'
 
+"""
+    Lambda handler function for processing requests - split image lists and join batch outputs. 
+    It is intended to be used with DynamoDB streams with a batch size of 1.
+"""
 def process_request_handler(event, context):
-    # iterate through all new records
+    # First part of the function is reposnible for splitting the list of images into batches of BATCH_SIZE number of items.
+    # Lambda could be set to be triggered on more than one records at a time, so tht's why we assume that is the case.
+    # We iterate through all new records and split their list of images into batches.
     for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'INSERT' and 'urls' in r['dynamodb']['NewImage']]:
         id = record['id']['S']
         list = asapvideo.get_valid_media_urls_only([o['M']['url']['S'] for o in sorted(record['urls']['L'], key=lambda url: int(url['M']['pos']['N']))], 'image')
@@ -31,6 +37,7 @@ def process_request_handler(event, context):
             update_record(id, {"sts": "processing", "batches": {"count": batches}})
             sns = boto3.client('sns')
             for i in range(0, batches):
+                # every batch is sent to the BATCHES_SNS_TOPIC SNS topic
                 message = json.dumps(clear_dict({
                     "id": id,
                     "batch": i + 1,
@@ -48,7 +55,8 @@ def process_request_handler(event, context):
                     Subject='SubmitBatch'
                 )
 
-    # iterate through all modified records
+    # Second part of the function is responsible for joining all batches' ouputs together and apply soundtrack.
+    # Here we iterate through all modified records and if number of batches is equal to the number of outputs we will try to join the outputs.
     for record in [r['dynamodb']['NewImage'] for r in event['Records'] if r['eventName'] == 'MODIFY' and 'urls' in r['dynamodb']['NewImage']]:
         # take those that are ready for final processment
         if  record['sts']['S'] == 'processing' and 'batches' in record and 'outputs' in record['batches']['M'] and int(record['batches']['M']['count']['N']) == len(record['batches']['M']['outputs']['L']):
@@ -77,6 +85,11 @@ def process_request_handler(event, context):
                 print "Failed to concatenate batches"
                 print traceback.format_exc(sys.exc_info())
 
+
+"""
+    Lambda handler function for processing batches. 
+    It is intended to be used with SNS topic for every batch notification.
+"""
 def process_batch_handler(event, context):
     for record in [json.loads(r['Sns']['Message']) for r in event['Records']]:
         id = record['id']
@@ -113,6 +126,9 @@ def process_batch_handler(event, context):
             update_record(id, {"sts":"failed"})
 
 
+"""
+    Uploads file to S3 bucket S3_BUCKET.
+"""
 def upload_to_s3(file, name):
     video = None
     if file:               
@@ -124,6 +140,9 @@ def upload_to_s3(file, name):
     return video
 
 
+"""
+    Updates dynamodb record by passed id and dictionary of values
+"""
 def update_record(id, values):
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table(DYNAMODB_TABLE)
@@ -134,6 +153,9 @@ def update_record(id, values):
     )
 
 
+"""
+    Adds batch output data to a DynamoDB record by passed id, batch number and output url.
+"""
 def add_output(id, batch, output):
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table(DYNAMODB_TABLE)
@@ -144,6 +166,9 @@ def add_output(id, batch, output):
     )
 
 
+"""
+    Copies ffmpeg executable to /tmp and gives it exec permissions. These steps are crutial for the lambdas to work.
+"""
 def get_ffmpeg():
     if os.path.isfile("/tmp/ffmpeg"):
         return os.path.abspath("/tmp/ffmpeg")
@@ -154,6 +179,9 @@ def get_ffmpeg():
     return "ffmpeg"
 
 
+"""
+    Removes keys with None values from dictionary.
+"""
 def clear_dict(d):
     # d.iteritems isn't used as you can't del or the iterator breaks.
     for key, value in d.items():
